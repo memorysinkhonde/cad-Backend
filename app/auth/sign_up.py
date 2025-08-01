@@ -301,9 +301,9 @@ async def sign_up(user: SignUpRequest):
             DELETE FROM verification_tokens WHERE email = %s
         """, (user.email,))
         
+        # FIXED: Remove duplicate VALUES clause
         cur.execute("""
             INSERT INTO verification_tokens (email, verification_code, is_verified, created_at)
-            VALUES (%s, %s, FALSE, CURRENT_TIMESTAMP)
             VALUES (%s, %s, FALSE, CURRENT_TIMESTAMP)
         """, (user.email, verification_code))
         
@@ -416,6 +416,12 @@ async def verify_email(data: VerifyRequest):
             """, (hospital_name,))
             hospital_id = cur.fetchone()
 
+        if not hospital_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create or find hospital record"
+            )
+
         # Create the user
         cur.execute("""
             INSERT INTO users 
@@ -428,7 +434,7 @@ async def verify_email(data: VerifyRequest):
             first_name,
             last_name,
             role,
-            hospital_id[0] if hospital_id else None
+            hospital_id[0]
         ))
         user_result = cur.fetchone()
         if not user_result:
