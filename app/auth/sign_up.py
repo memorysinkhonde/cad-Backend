@@ -22,7 +22,7 @@ router = APIRouter()
 EMAIL_CONFIG = {
     "address": "thandiechongwe@gmail.com",
     "password": "rkrefuxopjmdmwgp",  # App Password
-    "sender_name": "Healthcare Verification System",
+    "sender_name": "Healthcare Management System",
     "smtp_server": "smtp.gmail.com",
     "smtp_port": 465
 }
@@ -93,37 +93,107 @@ async def send_verification_email(to_email: str, code: str):
     """Send verification email with the code"""
     try:
         msg = EmailMessage()
-        msg["Subject"] = "Your Verification Code for Healthcare Access"
+        msg["Subject"] = "Healthcare Management System - Email Verification Required"
         msg["From"] = formataddr((EMAIL_CONFIG["sender_name"], EMAIL_CONFIG["address"]))
         msg["To"] = to_email
 
         # Plain text version
         msg.set_content(f"""
-        Healthcare Access Verification
+Healthcare Access Verification System
 
-        Your verification code is: {code}
+Dear User,
 
-        This code will expire in {APP_CONFIG["verification_code_expiry_hours"]} hours.
+Thank you for registering with our Healthcare Management System.
 
-        If you didn't request this, please ignore this email.
+Your verification code is: {code}
+
+Please enter this code to complete your registration. This code will expire in {APP_CONFIG["verification_code_expiry_hours"]} hours for security purposes.
+
+If you did not request this verification, please ignore this email and contact our support team.
+
+Best regards,
+Healthcare Management Team
+
+---
+This is an automated message. Please do not reply to this email.
         """)
 
-        # HTML version - Fixed datetime reference
+        # Professional HTML version
         html_content = f"""
-        <html>
-            <body style="font-family: Arial, sans-serif;">
-                <h2 style="color: #2563eb;">Healthcare Access Verification</h2>
-                <p>Your verification code is:</p>
-                <div style="background: #f3f4f6; padding: 10px; border-radius: 5px; 
-                            display: inline-block; margin: 10px 0;">
-                    <h3 style="margin: 0; color: #2563eb; font-size: 24px;">{code}</h3>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Email Verification</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; line-height: 1.6;">
+            <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
+                    <div style="background-color: #ffffff; border-radius: 50%; width: 80px; height: 80px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#667eea" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">Healthcare Management System</h1>
+                    <p style="color: #e2e8f0; margin: 10px 0 0; font-size: 16px;">Email Verification Required</p>
                 </div>
-                <p style="color: #6b7280;">This code expires in {APP_CONFIG["verification_code_expiry_hours"]} hours.</p>
-                <hr style="border: 0; border-top: 1px solid #e5e7eb;">
-                <small style="color: #9ca3af;">
-                    © {dt.datetime.now().year} Healthcare System
-                </small>
-            </body>
+                
+                <!-- Content -->
+                <div style="padding: 40px 30px;">
+                    <h2 style="color: #1a202c; margin: 0 0 20px; font-size: 24px; font-weight: 600;">Verify Your Email Address</h2>
+                    
+                    <p style="color: #4a5568; margin: 0 0 25px; font-size: 16px;">
+                        Thank you for registering with our Healthcare Management System. To complete your registration and secure your account, please verify your email address using the verification code below.
+                    </p>
+                    
+                    <!-- Verification Code Box -->
+                    <div style="background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%); border: 2px solid #e2e8f0; border-radius: 12px; padding: 30px; text-align: center; margin: 30px 0;">
+                        <p style="color: #718096; margin: 0 0 15px; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">Your Verification Code</p>
+                        <div style="background-color: #ffffff; border: 2px dashed #667eea; border-radius: 8px; padding: 20px; display: inline-block;">
+                            <span style="font-family: 'Courier New', monospace; font-size: 32px; font-weight: bold; color: #667eea; letter-spacing: 4px;">{code}</span>
+                        </div>
+                        <p style="color: #a0aec0; margin: 15px 0 0; font-size: 12px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 8px;">
+                                <path d="M12 2C6.48 2 2 6.48 2 12S6.48 22 12 22 22 17.52 22 12 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="#a0aec0"/>
+                            </svg>
+                            This code expires in {APP_CONFIG["verification_code_expiry_hours"]} hours
+                        </p>
+                    </div>
+                    
+                    <!-- Instructions -->
+                    <div style="background-color: #ebf8ff; border-left: 4px solid #3182ce; padding: 20px; margin: 25px 0; border-radius: 0 8px 8px 0;">
+                        <h3 style="color: #2c5282; margin: 0 0 10px; font-size: 16px; font-weight: 600;">How to use this code:</h3>
+                        <ol style="color: #2d3748; margin: 0; padding-left: 20px; font-size: 14px;">
+                            <li style="margin-bottom: 5px;">Return to the registration page</li>
+                            <li style="margin-bottom: 5px;">Enter the 6-digit verification code above</li>
+                            <li style="margin-bottom: 5px;">Click "Verify Email" to complete your registration</li>
+                        </ol>
+                    </div>
+                    
+                    <!-- Security Notice -->
+                    <div style="background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 25px 0; border-radius: 0 8px 8px 0;">
+                        <p style="color: #92400e; margin: 0; font-size: 14px;">
+                            <strong>Security Notice:</strong> If you did not request this verification, please ignore this email. Your account will remain unverified and no further action is required.
+                        </p>
+                    </div>
+                </div>
+                
+                <!-- Footer -->
+                <div style="background-color: #f7fafc; padding: 30px; text-align: center; border-top: 1px solid #e2e8f0;">
+                    <p style="color: #718096; margin: 0 0 10px; font-size: 14px;">
+                        Need help? Contact our support team at <a href="mailto:support@healthcare.com" style="color: #3182ce; text-decoration: none;">support@healthcare.com</a>
+                    </p>
+                    <p style="color: #a0aec0; margin: 0; font-size: 12px;">
+                        © {dt.datetime.now().year} Healthcare Management System. All rights reserved.
+                    </p>
+                    <p style="color: #cbd5e0; margin: 10px 0 0; font-size: 11px;">
+                        This is an automated message. Please do not reply to this email.
+                    </p>
+                </div>
+            </div>
+        </body>
         </html>
         """
         msg.add_alternative(html_content, subtype="html")
@@ -149,17 +219,19 @@ def cleanup_expired_data(cur):
     try:
         expiry_hours = APP_CONFIG["verification_code_expiry_hours"]
         
-        # Delete verification tokens
+        # Delete expired verification tokens (both verified and unverified)
         cur.execute(sql.SQL("""
             DELETE FROM verification_tokens 
             WHERE created_at <= NOW() - INTERVAL '{} hours'
         """).format(sql.Literal(expiry_hours)))
         
-        # Delete temp user data
+        # Delete expired temp user data
         cur.execute(sql.SQL("""
             DELETE FROM temp_user_data 
             WHERE created_at <= NOW() - INTERVAL '{} hours'
         """).format(sql.Literal(expiry_hours)))
+        
+        logger.info("Expired verification data cleaned up successfully")
     except Exception as e:
         logger.error(f"Failed to clean up expired data: {str(e)}")
         raise
@@ -224,15 +296,17 @@ async def sign_up(user: SignUpRequest):
             user.hospital_name
         ))
 
-        # Store verification code
+        # Store verification code - Delete any existing token first to ensure clean state
         cur.execute("""
-            INSERT INTO verification_tokens (email, verification_code)
-            VALUES (%s, %s)
-            ON CONFLICT (email) DO UPDATE SET
-                verification_code = EXCLUDED.verification_code,
-                is_verified = FALSE,
-                created_at = CURRENT_TIMESTAMP
+            DELETE FROM verification_tokens WHERE email = %s
+        """, (user.email,))
+        
+        cur.execute("""
+            INSERT INTO verification_tokens (email, verification_code, is_verified, created_at)
+            VALUES (%s, %s, FALSE, CURRENT_TIMESTAMP)
         """, (user.email, verification_code))
+        
+        logger.info(f"New verification token created for {user.email}")
 
         conn.commit()
 
@@ -286,14 +360,17 @@ async def verify_email(data: VerifyRequest):
         record = cur.fetchone()
 
         if not record:
+            logger.warning(f"Verification attempt failed - no valid token found for email: {data.email}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Verification code expired or not found"
             )
 
         stored_code, is_verified = record
+        logger.info(f"Verification attempt for {data.email}: is_verified={is_verified}")
 
         if is_verified:
+            logger.warning(f"Verification attempt failed - email already verified: {data.email}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already verified"
