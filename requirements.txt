@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pillow
+python-multipart
+requests
+opencv-python
+pydantic
+pandas
+joblib
+gdown
+scikit-learn==1.2.2
+numpy==1.26.4

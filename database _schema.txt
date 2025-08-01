@@ -1,0 +1,87 @@
+-- Drop existing tables in reverse dependency order
+DROP TABLE IF EXISTS images CASCADE;
+DROP TABLE IF EXISTS patients CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS hospitals CASCADE;
+DROP TABLE IF EXISTS verification_tokens CASCADE;
+DROP TABLE IF EXISTS temp_user_data CASCADE;
+
+-- Verification Tokens Table
+CREATE TABLE verification_tokens (
+    token_id SERIAL PRIMARY KEY,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    verification_code VARCHAR(6) NOT NULL,
+    is_verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Temporary User Data Table
+CREATE TABLE temp_user_data (
+    temp_id SERIAL PRIMARY KEY,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    role VARCHAR(20) CHECK (role IN ('nurse', 'doctor')) NOT NULL,
+    hospital_name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Hospitals Table
+CREATE TABLE hospitals (
+    hospital_id SERIAL PRIMARY KEY,
+    hospital_name VARCHAR(100) UNIQUE NOT NULL
+);
+
+-- Users Table
+CREATE TABLE users (
+    user_id SERIAL PRIMARY KEY,
+    email VARCHAR(100) UNIQUE NOT NULL CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
+    password_hash TEXT NOT NULL,
+    role VARCHAR(20) CHECK (role IN ('nurse', 'doctor')) NOT NULL,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    hospital_id INTEGER REFERENCES hospitals(hospital_id) ON DELETE SET NULL
+);
+
+-- Patients Table (with all diagnostic features)
+CREATE TABLE patients (
+    patient_id SERIAL PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    age INTEGER NOT NULL,
+    sex INTEGER CHECK (sex IN (0, 1)) NOT NULL, -- 0 = Female, 1 = Male
+    bmi NUMERIC(5,2) NOT NULL,
+    diabetes_mellitus BOOLEAN NOT NULL,
+    evolution_diabetes NUMERIC(5,2) NOT NULL,
+    dyslipidemia BOOLEAN NOT NULL,
+    smoker BOOLEAN NOT NULL,
+    high_blood_pressure BOOLEAN NOT NULL,
+    kidney_failure BOOLEAN NOT NULL,
+    heart_failure BOOLEAN NOT NULL,
+    atrial_fibrillation BOOLEAN NOT NULL,
+    left_ventricular_ejection_fraction NUMERIC(5,2) NOT NULL,
+    clinical_indication_for_angiogrphy INTEGER CHECK (clinical_indication_for_angiogrphy BETWEEN 0 AND 5) NOT NULL,
+    number_of_vessels_affected INTEGER CHECK (number_of_vessels_affected BETWEEN 0 AND 5) NOT NULL,
+    maximum_degree_of_the_coronary_artery_involvement NUMERIC(5,2) CHECK (maximum_degree_of_the_coronary_artery_involvement BETWEEN 0 AND 100) NOT NULL,
+    status VARCHAR(30) DEFAULT 'Pending Doctor Review'
+        CHECK (status IN ('Pending Doctor Review', 'Ready for Prediction', 'Completed')),
+    prediction_result INTEGER CHECK (prediction_result IN (0, 1)) DEFAULT NULL, -- 0 = No Lesion, 1 = Lesion
+    prediction_label VARCHAR(20) CHECK (prediction_label IN ('lesion', 'nonlesion')) DEFAULT NULL,
+    prediction_confidence NUMERIC(5,4) DEFAULT NULL,
+    predicted_at TIMESTAMP DEFAULT NULL,
+    hospital_id INTEGER REFERENCES hospitals(hospital_id) ON DELETE SET NULL,
+    assigned_doctor_id INTEGER REFERENCES users(user_id) ON DELETE SET NULL,
+    created_by INTEGER REFERENCES users(user_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Image Uploads Table
+CREATE TABLE images (
+    image_id SERIAL PRIMARY KEY,
+    patient_id INTEGER REFERENCES patients(patient_id) ON DELETE CASCADE,
+    image_path TEXT NOT NULL,
+    base64_image TEXT NOT NULL,
+    prediction_result VARCHAR(50) CHECK (prediction_result IN ('Lesion', 'No Lesion')) DEFAULT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
