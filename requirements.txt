@@ -10,3 +10,4 @@ joblib
 gdown
 scikit-learn==1.2.2
 numpy==1.26.4
+psycopg2-binary
