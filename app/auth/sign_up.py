@@ -63,10 +63,30 @@ class SignUpRequest(BaseModel):
         if not any(not c.isalnum() for c in v):
             raise ValueError('Password must contain at least one special character')
         return v
+    
+    @validator('first_name', 'last_name')
+    def validate_names(cls, v):
+        if not v.strip():
+            raise ValueError('Name cannot be empty or contain only whitespace')
+        # Remove extra whitespace and capitalize properly
+        return ' '.join(word.capitalize() for word in v.strip().split())
+    
+    @validator('hospital_name')
+    def validate_hospital_name(cls, v):
+        if not v.strip():
+            raise ValueError('Hospital name cannot be empty or contain only whitespace')
+        # Remove extra whitespace but preserve original capitalization
+        return ' '.join(v.strip().split())
 
 class VerifyRequest(BaseModel):
     email: EmailStr
     verification_code: constr(min_length=6, max_length=6)  # type: ignore
+    
+    @validator('verification_code')
+    def validate_verification_code(cls, v):
+        if not v.isdigit():
+            raise ValueError('Verification code must contain only digits')
+        return v
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -250,25 +270,33 @@ async def sign_up(user: SignUpRequest):
         # Clean up expired data first
         cleanup_expired_data(cur)
 
-        # Check if email already exists
+        # Check if email already exists in users table
         cur.execute("SELECT 1 FROM users WHERE email = %s", (user.email,))
         if cur.fetchone():
+            logger.info(f"Sign-up attempt for already registered email: {user.email}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
+                detail="Email already registered. Please log in instead."
             )
 
-        # Check for recent unverified codes
+        # Check for recent unverified codes (rate limiting)
         cur.execute(sql.SQL("""
-            SELECT 1 FROM verification_tokens 
+            SELECT created_at FROM verification_tokens 
             WHERE email = %s AND is_verified = FALSE
             AND created_at > NOW() - INTERVAL '{} minutes'
+            ORDER BY created_at DESC
+            LIMIT 1
         """).format(sql.Literal(APP_CONFIG["resend_cooldown_minutes"])), 
                    (user.email,))
-        if cur.fetchone():
+        recent_token = cur.fetchone()
+        
+        if recent_token:
+            time_remaining = APP_CONFIG['resend_cooldown_minutes'] - int(
+                (datetime.utcnow() - recent_token[0]).total_seconds() / 60
+            )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Please wait {APP_CONFIG['resend_cooldown_minutes']} minutes before requesting another code"
+                detail=f"Please wait {max(1, time_remaining)} more minutes before requesting another code"
             )
 
         # Generate verification code
@@ -311,12 +339,24 @@ async def sign_up(user: SignUpRequest):
 
         conn.commit()
 
-        # Send verification email
-        await send_verification_email(user.email, verification_code)
+        # Send verification email - if this fails, we should still inform user that code was created
+        try:
+            await send_verification_email(user.email, verification_code)
+            logger.info(f"Verification email successfully sent to {user.email}")
+        except HTTPException as email_error:
+            # If email sending fails, we should still let the user know the code was created
+            # but inform them about email delivery issues
+            logger.error(f"Failed to send verification email to {user.email}: {email_error.detail}")
+            return {
+                "message": "Verification code created but email delivery failed. Please contact support.",
+                "email": user.email,
+                "email_sent": False
+            }
 
         return {
             "message": "Verification code sent to your email",
-            "email": user.email
+            "email": user.email,
+            "email_sent": True
         }
 
     except HTTPException:
@@ -378,6 +418,7 @@ async def verify_email(data: VerifyRequest):
             )
 
         if data.verification_code != stored_code:
+            logger.warning(f"Invalid verification code attempt for {data.email}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid verification code"
@@ -400,27 +441,31 @@ async def verify_email(data: VerifyRequest):
 
         first_name, last_name, role, hospital_name, password_hash = user_data
 
-        # Ensure hospital exists
+        # Ensure hospital exists and get hospital_id
         cur.execute("""
             INSERT INTO hospitals (hospital_name)
             VALUES (%s)
             ON CONFLICT (hospital_name) DO NOTHING
             RETURNING hospital_id
         """, (hospital_name,))
-        hospital_id = cur.fetchone()
+        hospital_result = cur.fetchone()
         
-        if not hospital_id:
+        if hospital_result:
+            hospital_id = hospital_result[0]
+        else:
+            # Hospital already exists, get its ID
             cur.execute("""
                 SELECT hospital_id FROM hospitals 
                 WHERE hospital_name = %s
             """, (hospital_name,))
-            hospital_id = cur.fetchone()
-
-        if not hospital_id:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create or find hospital record"
-            )
+            hospital_result = cur.fetchone()
+            
+            if not hospital_result:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create or find hospital record"
+                )
+            hospital_id = hospital_result[0]
 
         # Create the user
         cur.execute("""
@@ -434,7 +479,7 @@ async def verify_email(data: VerifyRequest):
             first_name,
             last_name,
             role,
-            hospital_id[0]
+            hospital_id
         ))
         user_result = cur.fetchone()
         if not user_result:
@@ -458,6 +503,8 @@ async def verify_email(data: VerifyRequest):
         """, (data.email,))
 
         conn.commit()
+        
+        logger.info(f"User successfully created and verified: {data.email} (ID: {user_id})")
 
         # Create access token
         access_token_expires = timedelta(minutes=APP_CONFIG["access_token_expire_minutes"])
