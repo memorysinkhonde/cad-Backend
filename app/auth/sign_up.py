@@ -13,6 +13,7 @@ from psycopg2 import sql
 from jose import jwt
 from typing import Optional
 import datetime as dt  # Separate import for datetime module
+from app.Database.db_connection import get_db_connection
 
 router = APIRouter()
 
@@ -24,15 +25,6 @@ EMAIL_CONFIG = {
     "sender_name": "Healthcare Verification System",
     "smtp_server": "smtp.gmail.com",
     "smtp_port": 465
-}
-
-# Database Configuration
-DB_CONFIG = {
-    "dbname": "neondb",
-    "user": "neondb_owner",
-    "password": "npg_ZwQX5EM3gTAe",
-    "host": "ep-ancient-sun-adaahfv0-pooler.c-2.us-east-1.aws.neon.tech",
-    "sslmode": "require"
 }
 
 # Application Configuration
@@ -59,7 +51,7 @@ class SignUpRequest(BaseModel):
     password: constr(min_length=8)  # type: ignore
     first_name: constr(min_length=1, max_length=50)  # type: ignore
     last_name: constr(min_length=1, max_length=50)  # type: ignore
-    role: constr(regex="^(nurse|doctor)$")  # type: ignore
+    role: constr(pattern="^(nurse|doctor)$")  # type: ignore
     hospital_name: constr(min_length=1, max_length=100)  # type: ignore
 
     @validator('password')
@@ -84,18 +76,6 @@ class TokenResponse(BaseModel):
     email: str
 
 # ========== HELPER FUNCTIONS ==========
-def get_db_connection():
-    """Establish database connection"""
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        return conn
-    except Exception as e:
-        logger.error(f"Database connection failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection unavailable"
-        )
-
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -193,8 +173,7 @@ def cleanup_expired_data(cur):
 async def sign_up(user: SignUpRequest):
     conn, cur = None, None
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
+        conn, cur = get_db_connection()
 
         # Clean up expired data first
         cleanup_expired_data(cur)
@@ -290,8 +269,7 @@ async def sign_up(user: SignUpRequest):
 async def verify_email(data: VerifyRequest):
     conn, cur = None, None
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
+        conn, cur = get_db_connection()
 
         # Clean up expired data first
         cleanup_expired_data(cur)
@@ -374,7 +352,13 @@ async def verify_email(data: VerifyRequest):
             role,
             hospital_id[0] if hospital_id else None
         ))
-        user_id = cur.fetchone()[0]
+        user_result = cur.fetchone()
+        if not user_result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user"
+            )
+        user_id = user_result[0]
 
         # Mark as verified
         cur.execute("""
