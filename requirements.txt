@@ -13,3 +13,7 @@ numpy==1.26.4
 psycopg2-binary
 python-jose[cryptography]
 tensorflow==2.18.0
+passlib
+email-validator
+beautifulsoup4
+bcrypt
