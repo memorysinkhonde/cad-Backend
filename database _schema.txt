@@ -1,8 +1,22 @@
--- Drop existing tables in reverse dependency order
+import psycopg2
+
+# Connect to your Neon DB
+conn = psycopg2.connect(
+    dbname="neondb",
+    user="neondb_owner",
+    password="npg_ZwQX5EM3gTAe",
+    host="ep-ancient-sun-adaahfv0-pooler.c-2.us-east-1.aws.neon.tech",
+    sslmode="require"
+)
+
+cur = conn.cursor()
+
+schema_reset_sql = """
+-- Drop tables in reverse dependency order
 DROP TABLE IF EXISTS images CASCADE;
 DROP TABLE IF EXISTS patients CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
-DROP TABLE IF EXISTS hospitals CASCADE;
+DROP TABLE IF EXISTS hospitals CASCADE;  
 DROP TABLE IF EXISTS verification_tokens CASCADE;
 DROP TABLE IF EXISTS temp_user_data CASCADE;
 
@@ -33,7 +47,7 @@ CREATE TABLE hospitals (
     hospital_name VARCHAR(100) UNIQUE NOT NULL
 );
 
--- Users Table
+-- Users Table  
 CREATE TABLE users (
     user_id SERIAL PRIMARY KEY,
     email VARCHAR(100) UNIQUE NOT NULL CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
@@ -44,13 +58,13 @@ CREATE TABLE users (
     hospital_id INTEGER REFERENCES hospitals(hospital_id) ON DELETE SET NULL
 );
 
--- Patients Table (with all diagnostic features)
+-- Patients Table
 CREATE TABLE patients (
     patient_id SERIAL PRIMARY KEY,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
     age INTEGER NOT NULL,
-    sex INTEGER CHECK (sex IN (0, 1)) NOT NULL, -- 0 = Female, 1 = Male
+    sex INTEGER CHECK (sex IN (0, 1)) NOT NULL, -- 0=Female, 1=Male
     bmi NUMERIC(5,2) NOT NULL,
     diabetes_mellitus BOOLEAN NOT NULL,
     evolution_diabetes NUMERIC(5,2) NOT NULL,
@@ -76,7 +90,7 @@ CREATE TABLE patients (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Image Uploads Table
+-- Images Table
 CREATE TABLE images (
     image_id SERIAL PRIMARY KEY,
     patient_id INTEGER REFERENCES patients(patient_id) ON DELETE CASCADE,
@@ -85,3 +99,16 @@ CREATE TABLE images (
     prediction_result VARCHAR(50) CHECK (prediction_result IN ('Lesion', 'No Lesion')) DEFAULT NULL,
     uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+"""
+
+# Execute Schema Reset
+try:
+    cur.execute(schema_reset_sql)
+    conn.commit()
+    print("✅ All tables dropped and recreated successfully (finalized schema with patient prediction features)!")
+except Exception as e:
+    print("❌ Error executing schema reset:", e)
+    conn.rollback()
+finally:
+    cur.close()
+    conn.close()
