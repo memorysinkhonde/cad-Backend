@@ -455,7 +455,7 @@ async def verify_email(data: VerifyRequest):
         cur.execute("SELECT user_id, email FROM users WHERE email = %s", (data.email,))
         existing_user = cur.fetchone()
         if existing_user:
-            logger.error(f"CRITICAL: Verification attempt for already registered user: {data.email} (ID: {existing_user['user_id']})")
+            logger.error(f"CRITICAL: Verification attempt for already registered user: {data.email} (ID: {existing_user['user_id'] if existing_user else 'unknown'})")
             # Aggressively clean up any orphaned verification data
             cur.execute("DELETE FROM verification_tokens WHERE email = %s", (data.email,))
             cur.execute("DELETE FROM temp_user_data WHERE email = %s", (data.email,))
@@ -467,10 +467,12 @@ async def verify_email(data: VerifyRequest):
 
         # Debug: Check current state of verification data
         cur.execute("SELECT COUNT(*) as count FROM verification_tokens WHERE email = %s", (data.email,))
-        token_count = cur.fetchone()['count']
+        token_result = cur.fetchone()
+        token_count = token_result['count'] if token_result else 0
         
         cur.execute("SELECT COUNT(*) as count FROM temp_user_data WHERE email = %s", (data.email,))
-        temp_count = cur.fetchone()['count']
+        temp_result = cur.fetchone()
+        temp_count = temp_result['count'] if temp_result else 0
         
         logger.info(f"Pre-verification state for {data.email}: {token_count} tokens, {temp_count} temp records")
 
@@ -506,11 +508,11 @@ async def verify_email(data: VerifyRequest):
                 detail="Verification code expired or not found. Please request a new code."
             )
 
-        # Extract values from dictionary result
+        # Extract values from dictionary result with safe access
         stored_code = verification_record['verification_code']
         is_verified = verification_record['is_verified']
         token_created_at = verification_record['created_at']
-        token_id = verification_record['id']
+        token_id = verification_record['token_id']
         first_name = verification_record['first_name']
         last_name = verification_record['last_name']
         role = verification_record['role']
@@ -518,13 +520,22 @@ async def verify_email(data: VerifyRequest):
         password_hash = verification_record['password_hash']
         temp_id = verification_record['temp_id']
         
-        logger.info(f"Verification attempt for {data.email}: token_id={token_id}, temp_id={temp_id}, is_verified={is_verified}, token_age={datetime.utcnow() - token_created_at}")
+        # Validate all required fields are present
+        if not all([stored_code, token_id, first_name, last_name, role, hospital_name, password_hash, temp_id]):
+            logger.error(f"Missing required fields in verification record for {data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Invalid verification data. Please request a new code."
+            )
+        
+        logger.info(f"Verification attempt for {data.email}: token_id={token_id}, temp_id={temp_id}, is_verified={is_verified}")
 
         if is_verified:
             logger.error(f"CRITICAL: Token already verified - token_id={token_id}, email={data.email}")
             # This should never happen with our new logic, so let's investigate
             cur.execute("SELECT COUNT(*) as count FROM users WHERE email = %s", (data.email,))
-            user_count = cur.fetchone()['count']
+            user_result = cur.fetchone()
+            user_count = user_result.get('count', 0) if user_result else 0
             logger.error(f"Users table check: {user_count} users found for {data.email}")
             
             # Clean up the problematic token
@@ -543,9 +554,6 @@ async def verify_email(data: VerifyRequest):
                 detail="Invalid verification code"
             )
 
-        # At this point, we have valid temp user data from the JOIN query above
-        # No need to fetch it again, we already have: first_name, last_name, role, hospital_name, password_hash
-
         # Ensure hospital exists and get hospital_id
         cur.execute("""
             INSERT INTO hospitals (hospital_name)
@@ -556,7 +564,7 @@ async def verify_email(data: VerifyRequest):
         hospital_result = cur.fetchone()
         
         if hospital_result:
-            hospital_id = hospital_result['hospital_id']
+            hospital_id = hospital_result.get('hospital_id')
         else:
             # Hospital already exists, get its ID
             cur.execute("""
@@ -570,7 +578,7 @@ async def verify_email(data: VerifyRequest):
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to create or find hospital record"
                 )
-            hospital_id = hospital_result['hospital_id']
+            hospital_id = hospital_result.get('hospital_id')
 
         # Create the user with proper transaction handling
         try:
@@ -579,7 +587,8 @@ async def verify_email(data: VerifyRequest):
             
             # Final check before user creation (race condition protection)
             cur.execute("SELECT COUNT(*) as count FROM users WHERE email = %s", (data.email,))
-            existing_user_count = cur.fetchone()['count']
+            existing_result = cur.fetchone()
+            existing_user_count = existing_result.get('count', 0) if existing_result else 0
             if existing_user_count > 0:
                 logger.error(f"RACE CONDITION DETECTED: User {data.email} was created during verification process")
                 cur.execute("ROLLBACK TO SAVEPOINT user_creation")
@@ -611,7 +620,7 @@ async def verify_email(data: VerifyRequest):
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to create user"
                 )
-            user_id = user_result['user_id']
+            user_id = user_result.get('user_id')
             
             # Mark verification token as verified ONLY after successful user creation
             cur.execute("""
@@ -623,7 +632,7 @@ async def verify_email(data: VerifyRequest):
             # Verify the update worked
             cur.execute("SELECT is_verified FROM verification_tokens WHERE token_id = %s", (token_id,))
             updated_status = cur.fetchone()
-            if not updated_status or not updated_status['is_verified']:
+            if not updated_status or not updated_status.get('is_verified'):
                 logger.error(f"Failed to mark token {token_id} as verified for {data.email}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
