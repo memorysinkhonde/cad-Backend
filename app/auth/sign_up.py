@@ -11,7 +11,7 @@ from fastapi.security import OAuth2PasswordBearer
 import psycopg2
 from psycopg2 import sql
 from jose import jwt
-from typing import Optional
+from typing import Optional, Literal
 import datetime as dt  # Separate import for datetime module
 from app.Database.db_connection import get_db_connection
 
@@ -51,7 +51,7 @@ class SignUpRequest(BaseModel):
     password: constr(min_length=8)  # type: ignore
     first_name: constr(min_length=1, max_length=50)  # type: ignore
     last_name: constr(min_length=1, max_length=50)  # type: ignore
-    role: constr(pattern="^(nurse|doctor)$")  # type: ignore
+    role: Literal["nurse", "doctor"]  # Enforce allowed values
     hospital_name: constr(min_length=1, max_length=100)  # type: ignore
 
     @validator('password')
@@ -303,6 +303,7 @@ async def sign_up(user: SignUpRequest):
         
         cur.execute("""
             INSERT INTO verification_tokens (email, verification_code, is_verified, created_at)
+            VALUES (%s, %s, FALSE, CURRENT_TIMESTAMP)
             VALUES (%s, %s, FALSE, CURRENT_TIMESTAMP)
         """, (user.email, verification_code))
         
