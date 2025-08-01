@@ -244,16 +244,34 @@ def cleanup_expired_data(cur):
             DELETE FROM verification_tokens 
             WHERE created_at <= NOW() - INTERVAL '{} hours'
         """).format(sql.Literal(expiry_hours)))
+        expired_tokens = cur.rowcount
         
         # Delete expired temp user data
         cur.execute(sql.SQL("""
             DELETE FROM temp_user_data 
             WHERE created_at <= NOW() - INTERVAL '{} hours'
         """).format(sql.Literal(expiry_hours)))
+        expired_temp_data = cur.rowcount
         
-        logger.info("Expired verification data cleaned up successfully")
+        logger.info(f"Cleanup completed: {expired_tokens} expired tokens, {expired_temp_data} expired temp records removed")
     except Exception as e:
         logger.error(f"Failed to clean up expired data: {str(e)}")
+        raise
+
+def cleanup_user_verification_data(cur, email: str):
+    """Clean up all verification-related data for a specific user"""
+    try:
+        # Remove any existing verification tokens for this email
+        cur.execute("DELETE FROM verification_tokens WHERE email = %s", (email,))
+        tokens_removed = cur.rowcount
+        
+        # Remove any existing temp user data for this email
+        cur.execute("DELETE FROM temp_user_data WHERE email = %s", (email,))
+        temp_data_removed = cur.rowcount
+        
+        logger.info(f"User cleanup for {email}: {tokens_removed} tokens, {temp_data_removed} temp records removed")
+    except Exception as e:
+        logger.error(f"Failed to clean up user verification data for {email}: {str(e)}")
         raise
 
 # ========== API ENDPOINTS ==========
@@ -279,6 +297,9 @@ async def sign_up(user: SignUpRequest):
                 detail="Email already registered. Please log in instead."
             )
 
+        # Clean up any existing verification data for this email to ensure fresh start
+        cleanup_user_verification_data(cur, user.email)
+
         # Check for recent unverified codes (rate limiting)
         cur.execute(sql.SQL("""
             SELECT created_at FROM verification_tokens 
@@ -299,22 +320,16 @@ async def sign_up(user: SignUpRequest):
                 detail=f"Please wait {max(1, time_remaining)} more minutes before requesting another code"
             )
 
+        # Store verification code - Data is already cleaned up
         # Generate verification code
         verification_code = f"{random.randint(100000, 999999)}"
         hashed_password = get_password_hash(user.password)
 
-        # Store user data temporarily
+        # Store user data temporarily (fresh insert after cleanup)
         cur.execute("""
             INSERT INTO temp_user_data 
             (email, password_hash, first_name, last_name, role, hospital_name)
             VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (email) DO UPDATE SET
-                password_hash = EXCLUDED.password_hash,
-                first_name = EXCLUDED.first_name,
-                last_name = EXCLUDED.last_name,
-                role = EXCLUDED.role,
-                hospital_name = EXCLUDED.hospital_name,
-                created_at = CURRENT_TIMESTAMP
         """, (
             user.email,
             hashed_password,
@@ -324,12 +339,7 @@ async def sign_up(user: SignUpRequest):
             user.hospital_name
         ))
 
-        # Store verification code - Delete any existing token first to ensure clean state
-        cur.execute("""
-            DELETE FROM verification_tokens WHERE email = %s
-        """, (user.email,))
-        
-        # FIXED: Remove duplicate VALUES clause
+        # Create new verification token (guaranteed to be fresh)
         cur.execute("""
             INSERT INTO verification_tokens (email, verification_code, is_verified, created_at)
             VALUES (%s, %s, FALSE, CURRENT_TIMESTAMP)
@@ -389,9 +399,19 @@ async def verify_email(data: VerifyRequest):
         # Clean up expired data first
         cleanup_expired_data(cur)
 
+        # Double-check if user already exists (safety check)
+        cur.execute("SELECT user_id FROM users WHERE email = %s", (data.email,))
+        existing_user = cur.fetchone()
+        if existing_user:
+            logger.warning(f"Verification attempt for already registered user: {data.email}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered. Please log in instead."
+            )
+
         # Verify the code
         cur.execute(sql.SQL("""
-            SELECT verification_code, is_verified
+            SELECT verification_code, is_verified, created_at
             FROM verification_tokens 
             WHERE email = %s 
             AND created_at > NOW() - INTERVAL '{} hours'
@@ -404,17 +424,17 @@ async def verify_email(data: VerifyRequest):
             logger.warning(f"Verification attempt failed - no valid token found for email: {data.email}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Verification code expired or not found"
+                detail="Verification code expired or not found. Please request a new code."
             )
 
-        stored_code, is_verified = record
-        logger.info(f"Verification attempt for {data.email}: is_verified={is_verified}")
+        stored_code, is_verified, token_created_at = record
+        logger.info(f"Verification attempt for {data.email}: is_verified={is_verified}, token_age={datetime.utcnow() - token_created_at}")
 
         if is_verified:
-            logger.warning(f"Verification attempt failed - email already verified: {data.email}")
+            logger.warning(f"Verification attempt failed - token already verified: {data.email}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already verified"
+                detail="This verification code has already been used. Please request a new code."
             )
 
         if data.verification_code != stored_code:
@@ -467,21 +487,33 @@ async def verify_email(data: VerifyRequest):
                 )
             hospital_id = hospital_result[0]
 
-        # Create the user
-        cur.execute("""
-            INSERT INTO users 
-            (email, password_hash, first_name, last_name, role, hospital_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING user_id
-        """, (
-            data.email,
-            password_hash,
-            first_name,
-            last_name,
-            role,
-            hospital_id
-        ))
-        user_result = cur.fetchone()
+        # Create the user - Add additional safety check
+        try:
+            cur.execute("""
+                INSERT INTO users 
+                (email, password_hash, first_name, last_name, role, hospital_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING user_id
+            """, (
+                data.email,
+                password_hash,
+                first_name,
+                last_name,
+                role,
+                hospital_id
+            ))
+            user_result = cur.fetchone()
+        except psycopg2.IntegrityError as e:
+            # Handle case where email already exists (race condition protection)
+            if "duplicate key value violates unique constraint" in str(e):
+                logger.error(f"User creation failed - email already exists: {data.email}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email already registered. Please log in instead."
+                )
+            else:
+                raise e
+        
         if not user_result:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
